@@ -58,8 +58,11 @@ docker-compose up --build
 To run the tests, execute the following command:
 
 ```bash
-docker-compose run app go test ./...
+docker-compose exec app go test -v ./...
 ```
+
+Result:  
+![img.png](img.png)
 
 This will execute all the tests in the application, including the test for automatic auction closure.
 

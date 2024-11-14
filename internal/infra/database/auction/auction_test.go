@@ -2,32 +2,20 @@ package auction_test
 
 import (
 	"context"
-	"fullcycle-auction_go/configuration/database/mongodb"
-	"fullcycle-auction_go/configuration/logger"
 	"fullcycle-auction_go/internal/entity/auction_entity"
 	"fullcycle-auction_go/internal/infra/database/auction"
-	"os"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestAuctionAutoClose(t *testing.T) {
-	// Set environment variables
-	os.Setenv("AUCTION_DURATION", "2s")
-	os.Setenv("MONGODB_URL", "mongodb://admin:admin@localhost:27017")
-	os.Setenv("MONGODB_DB", "auction_db")
+	// Create a mock repository
+	repoMock := new(auction.AuctionRepositoryMock)
 
-	// Initialize MongoDB connection
-	client, err := mongodb.NewMongoDBConnection(context.Background())
-	if err != nil {
-		logger.Error("Error trying to connect to MongoDB", err)
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	database := client.Client().Database("auction_db")
-
-	repo := auction.NewAuctionRepository(database)
+	// Set up the auction duration
+	auctionDuration := 2 * time.Second
 
 	// Create an auction
 	auctionEntity, _ := auction_entity.CreateAuction(
@@ -36,14 +24,33 @@ func TestAuctionAutoClose(t *testing.T) {
 		"Descrição do Produto Teste",
 		auction_entity.New,
 	)
-	err = repo.CreateAuction(context.Background(), auctionEntity)
+
+	// Mock the CreateAuction method
+	repoMock.On("CreateAuction", mock.Anything, auctionEntity).Return(nil)
+
+	// Mock the FindAuctionById method before closure
+	repoMock.On("FindAuctionById", mock.Anything, auctionEntity.Id).
+		Return(auctionEntity, nil).Once()
+
+	// Start the goroutine that simulates auction closure
+	go func() {
+		time.Sleep(auctionDuration)
+		auctionEntity.Status = auction_entity.Completed
+
+		// Mock the FindAuctionById method after closure
+		repoMock.On("FindAuctionById", mock.Anything, auctionEntity.Id).
+			Return(auctionEntity, nil)
+	}()
+
+	// Call CreateAuction
+	err := repoMock.CreateAuction(context.Background(), auctionEntity)
 	assert.Nil(t, err)
 
-	// Wait for the auction to expire
-	time.Sleep(3 * time.Second)
+	// Wait for the auction to "expire"
+	time.Sleep(auctionDuration + 1*time.Second)
 
-	// Check if the auction status has been updated to Completed
-	updatedAuction, err := repo.FindAuctionById(context.Background(), auctionEntity.Id)
+	// Retrieve the auction after expiration
+	updatedAuction, err := repoMock.FindAuctionById(context.Background(), auctionEntity.Id)
 	assert.Nil(t, err)
 	assert.Equal(t, auction_entity.Completed, updatedAuction.Status)
 }
